@@ -1,24 +1,80 @@
 from django.shortcuts import render,redirect
 from . import token
 import requests
-from time import sleep
+from django.http import HttpResponse
+from weatherApp.forms import CityForm
+from weatherApp.models import City
 
 # Create your views here.
 
-def index(request):
-	if(request.method == 'POST'):
-		city = request.POST['city']
-		api = token.WEATHER_API_KEY
-		url = "http://api.openweathermap.org/data/2.5/weather?q={}&units=metric&appid={}".format(city,api)
-		responsed = requests.get(url).json()		
-		#print(responsed.json())
-		sleep(1)		
-		weather = {
-			'city': city,
-			'temp': responsed['main']['temp'],
-			'desc': responsed['weather'][0]['description'],
-			'icon': responsed['weather'][0]['icon']
-		}
-		dic = {'weather':weather}
-		return render (request, 'weatherApp/weather.html', dic)
-	return render(request,'weatherApp/home.html')
+# Create your views here.
+def get_weather_data(city_name):
+    api = token.WEATHER_API_KEY
+    url = 'https://api.openweathermap.org/data/2.5/weather'
+
+    params = {
+        'q': city_name,
+        'appid': api,
+        'units': 'metric',
+    }
+
+    response = requests.get(url, params=params)
+
+    if response.status_code != 200:
+        return
+
+    json_response = response.json()
+
+    weather_data = {
+        'temp': json_response['main']['temp'],
+        'temp_min': json_response['main']['temp_min'],
+        'temp_max': json_response['main']['temp_max'],
+        'city_name': json_response['name'],
+        'country': json_response['sys']['country'],
+        'lat': json_response['coord']['lat'],
+        'lon': json_response['coord']['lon'],
+        'weather': json_response['weather'][0]['main'],
+        'weather_desc': json_response['weather'][0]['description'],
+        'pressure': json_response['main']['pressure'],
+        'humidity': json_response['main']['humidity'],
+        'wind_speed': json_response['wind']['speed'],
+    }
+
+    return weather_data
+
+
+
+
+def home(request):
+    form = CityForm()
+
+    if request.method == 'POST':
+        form = CityForm(request.POST)
+        if form.is_valid():
+            form.save()
+            city_name = form.cleaned_data.get('city_name')
+            print(city_name)
+            weather_data = get_weather_data(city_name)
+    elif request.method == 'GET':
+        try:
+            city_name = City.objects.latest('date_added').city_name
+            weather_data = get_weather_data(city_name)
+        except Exception as e:
+            weather_data = None
+
+    template_name = 'home.html'
+    context = {'form': form, 'weather_data': weather_data}
+    return render(request, template_name, context=context)
+
+
+def history(request):
+    template_name = 'history.html'
+    cities = City.objects.all().order_by('-date_added')[:5]
+
+    weather_data_list = []
+    for city in cities:
+        city_name = city.city_name
+        weather_data_list.append(get_weather_data(city_name))
+
+    context = {'weather_data_list': weather_data_list}
+    return render(request, template_name, context)
